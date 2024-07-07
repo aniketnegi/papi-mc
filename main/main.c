@@ -258,6 +258,7 @@ void app_main()
     wifi_init_sta();
 
     // certificates problem 
+    // 07-07-2024@22:35 solved certificate problem by messing with AWS and docker conf. god
     // https://devopstar.com/2020/03/14/easy-aws-iot-with-esp-idf/
     mqtt_app_start(mqtt_event_handler);
 }

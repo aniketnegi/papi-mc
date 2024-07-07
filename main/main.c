@@ -188,10 +188,23 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         esp_mqtt_client_publish(client, "pv0/status/mc", "ONLINE", 0, 0, 0);
+        // meh
         esp_mqtt_client_subscribe(client, "pv0/test", 0);
+
+        // subscribe to /indratest/motor/
+        // should be qos2 - exactly 1ce
+        msg_id = esp_mqtt_client_subscribe(client, "pv0/commands", 2);
+        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        // ADC Tear Down
+        // ESP_ERROR_CHECK(adc_oneshot_del_unit(adc_handle));
+        // if (do_calibration2)
+        // {
+        //     adc_calibration_deinit(adc_cali_handle);
+        // }
         break;
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
@@ -210,8 +223,39 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         if (strncmp(event->topic, "pv0/commands", event->topic_len) == 0)
         {
-            if (strncmp(event->data, "MOISTURE_GET", event->data_len) == 0)
+            if (strncmp(event->data, "WATER_ON", event->data_len) == 0)
             {
+                ESP_LOGI(TAG, "Turning on Water");
+                // gpio_set_level(MOTOR, 1);
+            }
+            else if (strncmp(event->data, "WATER_OFF", event->data_len) == 0)
+            {
+                ESP_LOGI(TAG, "Turning off Water");
+                // gpio_set_level(MOTOR, 0);
+            }
+            else if (strncmp(event->data, "MOISTURE_GET", event->data_len) == 0)
+            {
+                // errors unless sensor is actually connected !
+                ESP_LOGI(TAG, "Checking soil moisture");
+                // vTaskDelay(500 / portTICK_PERIOD_MS); // Adjust the delay as needed
+                // if (do_calibration2)
+                // {
+                //     ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, adc_raw[0], &voltage[0]));
+                // }
+                // else
+                // {
+                //     ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, SENS_01, &adc_raw[0]));
+                // }
+                // // str convert
+                // int length = snprintf(NULL, 0, "%d", adc_raw[0]);
+                // char *val = malloc(length + 1);
+                // snprintf(val, length + 1, "%d", adc_raw[0]);
+
+                // msg_id = esp_mqtt_client_publish(client, "indra/moisture", val, 0, 0, 0);
+                // ESP_LOGI(TAG, "sent SOIL MOISTURE successful, msg_id=%d", msg_id);
+                // ESP_LOGI(TAG, "sent SOIL MOISTURE successful, data=%s", val);
+
+                // free(val); // thank you C !!
             }
         }
         break;
@@ -257,7 +301,7 @@ void app_main()
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
 
-    // certificates problem 
+    // certificates problem
     // 07-07-2024@22:35 solved certificate problem by messing with AWS and docker conf. god
     // https://devopstar.com/2020/03/14/easy-aws-iot-with-esp-idf/
     mqtt_app_start(mqtt_event_handler);

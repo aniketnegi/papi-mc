@@ -67,4 +67,15 @@ menu "PAPI"
     endchoice
     endmenu
 
+    menu "MQTT Broker Configuration"
+
+        config BROKER_URL
+            string "Broker URL"
+            default "mqtt://mqtt.eclipseprojects.io"
+            help
+                URL of the broker to connect to
+    
+    endmenu
+
+
 endmenu

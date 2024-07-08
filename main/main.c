@@ -338,6 +338,50 @@ void mqtt_app_start(esp_mqtt_event_handle_t mqtt_event_handler_cb)
     esp_mqtt_client_start(client);
 }
 
+/* SENSOR TASK RUNNING IN THE BG */
+
+SemaphoreHandle_t xMutex;
+
+// Sensor Thresholds
+#define MOISTURE_THRESHOLD_LOW 50  // Example threshold for turning the motor on
+#define MOISTURE_THRESHOLD_HIGH 60 // Example threshold for turning the motor off
+#define SENSOR_BG_READ_DELAY 7000  // (val / 1000) seconds
+
+// Function to control the motor based on sensor value
+void control_motor_based_on_moisture(int sensor_value)
+{
+    if (sensor_value < MOISTURE_THRESHOLD_LOW)
+    {
+        ESP_LOGI(TAG, "Moisture level low (%d), turning on water", sensor_value);
+        gpio_set_level(MOTOR, 1);
+        vTaskDelay(4000 / portTICK_PERIOD_MS);
+        gpio_set_level(MOTOR, 0);
+    }
+    else if (sensor_value > MOISTURE_THRESHOLD_HIGH)
+    {
+        ESP_LOGI(TAG, "Moisture level high (%d), turning off water", sensor_value);
+        gpio_set_level(MOTOR, 0);
+    }
+}
+
+// Sensor Reading and Motor Control Task
+void sensor_task(void *pvParameter)
+{
+    while (1)
+    {
+        if (xSemaphoreTake(xMutex, portMAX_DELAY))
+        {
+            int mp = get_moisture_percentage();
+
+            ESP_LOGI(TAG, "Moisture level: %d", mp);
+            control_motor_based_on_moisture(mp);
+
+            xSemaphoreGive(xMutex);
+        }
+        vTaskDelay(SENSOR_BG_READ_DELAY / portTICK_PERIOD_MS); // Adjust the delay as needed
+    }
+}
+
 void app_main()
 {
     // Initialize NVS
@@ -358,6 +402,14 @@ void app_main()
     // motor stuff
     gpio_reset_pin(MOTOR);
     gpio_set_direction(MOTOR, GPIO_MODE_OUTPUT);
+
+    // Create mutex for shared resource protection
+    xMutex = xSemaphoreCreateMutex();
+
+    if (xMutex != NULL)
+    {
+        xTaskCreate(sensor_task, "bg sensor", 4096, NULL, tskIDLE_PRIORITY, NULL);
+    }
 
     // certificates problem
     // 07-07-2024@22:35 solved certificate problem by messing with AWS and docker conf. god

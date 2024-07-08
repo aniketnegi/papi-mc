@@ -213,17 +213,12 @@ adc_oneshot_unit_handle_t adc_init(adc_unit_t adc_unit, adc_channel_t adc_channe
     return adc_handle;
 }
 
-// static uint16_t get_moisture_value()
-// {
-//     if (do_calibration2)
-//     {
-//         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, &adc_raw[0], &voltage[0]));
-//     }
-//     else
-//     {
-//         ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, SENS_01, &adc_raw[0]));
-//     }
-// }
+int get_moisture_percentage()
+{
+    ESP_ERROR_CHECK(adc_oneshot_read(papi_adc_handle, SENS_01, &adc_raw[0]));
+
+    return (int)((1 - ((float)adc_raw[0] / 4096)) * 100);
+}
 
 /*---------------------------------------------------------------
   ---------------------------------------------------------------
@@ -298,12 +293,14 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 ESP_LOGI(TAG, "Checking soil moisture");
                 vTaskDelay(500 / portTICK_PERIOD_MS); // Adjust the delay as needed
 
-                ESP_ERROR_CHECK(adc_oneshot_read(papi_adc_handle, SENS_01, &adc_raw[0]));
+                // uint16_t moisture_percent = get_moisture_percentage();
+
+                int moisture_percent = get_moisture_percentage();
 
                 // str convert
-                int length = snprintf(NULL, 0, "%d", adc_raw[0]);
+                int length = snprintf(NULL, 0, "%d", moisture_percent);
                 char *val = malloc(length + 1);
-                snprintf(val, length + 1, "%d", adc_raw[0]);
+                snprintf(val, length + 1, "%d", moisture_percent);
 
                 msg_id = esp_mqtt_client_publish(client, "pv0/moisture", val, 0, 0, 0);
                 ESP_LOGI(TAG, "sent SOIL MOISTURE successful, msg_id=%d", msg_id);

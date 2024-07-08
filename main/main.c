@@ -11,8 +11,36 @@
 #include "esp_system.h"
 #include "esp_netif.h"
 
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+
+#include "driver/gpio.h"
+
 #include "lwip/err.h"
 #include "lwip/sys.h"
+
+#define MOTOR 21
+
+/*---------------------------------------------------------------
+        ADC General Macros
+---------------------------------------------------------------*/
+// ADC2 Channels
+#define SENS_01 ADC_CHANNEL_6 // GPIO34
+// #define SENS_02 ADC_CHANNEL_3 // GPIO15
+// #define SENS_03 ADC_CHANNEL_4 // GPIO13
+// #define SENS_04 ADC_CHANNEL_5 // GPIO12
+#define ADC_ATTEN ADC_ATTEN_DB_12
+#define ADC_UNIT ADC_UNIT_1
+
+#define NUM_OF_SENSORS 1
+
+int adc_raw[NUM_OF_SENSORS] = {-1};
+
+/*---------------------------------------------------------------
+        ADC Vars
+---------------------------------------------------------------*/
+adc_oneshot_unit_handle_t papi_adc_handle;
 
 #define ESP_WIFI_SSID CONFIG_ESP_WIFI_SSID
 #define ESP_WIFI_PASS CONFIG_ESP_WIFI_PASSWORD
@@ -160,6 +188,42 @@ void wifi_init_sta(void)
     }
 }
 
+/* ADC */
+
+adc_oneshot_unit_handle_t adc_init(adc_unit_t adc_unit, adc_channel_t adc_channel, adc_atten_t adc_atten)
+{
+
+    //-------------ADC Init---------------//
+    adc_oneshot_unit_handle_t adc_handle;
+    adc_oneshot_unit_init_cfg_t init_config = {
+        .unit_id = adc_unit,
+        .ulp_mode = ADC_ULP_MODE_DISABLE,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &adc_handle));
+
+    //-------------ADC Config---------------//
+    adc_oneshot_chan_cfg_t config = {
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+        .atten = adc_atten,
+    };
+    //-------------ADC Config---------------//
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, adc_channel, &config));
+
+    return adc_handle;
+}
+
+// static uint16_t get_moisture_value()
+// {
+//     if (do_calibration2)
+//     {
+//         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, &adc_raw[0], &voltage[0]));
+//     }
+//     else
+//     {
+//         ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, SENS_01, &adc_raw[0]));
+//     }
+// }
+
 /*---------------------------------------------------------------
   ---------------------------------------------------------------
        MQTT
@@ -237,25 +301,21 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             {
                 // errors unless sensor is actually connected !
                 ESP_LOGI(TAG, "Checking soil moisture");
-                // vTaskDelay(500 / portTICK_PERIOD_MS); // Adjust the delay as needed
-                // if (do_calibration2)
-                // {
-                //     ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc_cali_handle, adc_raw[0], &voltage[0]));
-                // }
-                // else
-                // {
-                //     ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, SENS_01, &adc_raw[0]));
-                // }
-                // // str convert
-                // int length = snprintf(NULL, 0, "%d", adc_raw[0]);
-                // char *val = malloc(length + 1);
-                // snprintf(val, length + 1, "%d", adc_raw[0]);
+                vTaskDelay(500 / portTICK_PERIOD_MS); // Adjust the delay as needed
 
-                // msg_id = esp_mqtt_client_publish(client, "indra/moisture", val, 0, 0, 0);
-                // ESP_LOGI(TAG, "sent SOIL MOISTURE successful, msg_id=%d", msg_id);
-                // ESP_LOGI(TAG, "sent SOIL MOISTURE successful, data=%s", val);
+                ESP_ERROR_CHECK(adc_oneshot_read(papi_adc_handle, SENS_01, &adc_raw[0]));
 
-                // free(val); // thank you C !!
+                printf("VALUE: %d\n", adc_raw[0]);
+                // str convert
+                int length = snprintf(NULL, 0, "%d", adc_raw[0]);
+                char *val = malloc(length + 1);
+                snprintf(val, length + 1, "%d", adc_raw[0]);
+
+                msg_id = esp_mqtt_client_publish(client, "pv0/moisture", val, 0, 0, 0);
+                ESP_LOGI(TAG, "sent SOIL MOISTURE successful, msg_id=%d", msg_id);
+                ESP_LOGI(TAG, "sent SOIL MOISTURE successful, data=%s", val);
+
+                free(val); // thank you C !!
             }
         }
         break;
@@ -300,6 +360,13 @@ void app_main()
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
+
+    // ADC Stuff
+    papi_adc_handle = adc_init(ADC_UNIT, SENS_01, ADC_ATTEN);
+
+    // motor stuff
+    gpio_reset_pin(MOTOR);
+    gpio_set_direction(MOTOR, GPIO_MODE_OUTPUT);
 
     // certificates problem
     // 07-07-2024@22:35 solved certificate problem by messing with AWS and docker conf. god

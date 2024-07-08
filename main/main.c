@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -11,8 +12,36 @@
 #include "esp_system.h"
 #include "esp_netif.h"
 
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+
+#include "driver/gpio.h"
+
 #include "lwip/err.h"
 #include "lwip/sys.h"
+
+#define MOTOR 21
+
+/*---------------------------------------------------------------
+        ADC General Macros
+---------------------------------------------------------------*/
+// ADC2 Channels
+#define SENS_01 ADC_CHANNEL_6 // GPIO34
+// #define SENS_02 ADC_CHANNEL_3 // GPIO15
+// #define SENS_03 ADC_CHANNEL_4 // GPIO13
+// #define SENS_04 ADC_CHANNEL_5 // GPIO12
+#define ADC_ATTEN ADC_ATTEN_DB_12
+#define ADC_UNIT ADC_UNIT_1
+
+#define NUM_OF_SENSORS 1
+
+int adc_raw[NUM_OF_SENSORS] = {-1};
+
+/*---------------------------------------------------------------
+        ADC Vars
+---------------------------------------------------------------*/
+adc_oneshot_unit_handle_t papi_adc_handle;
 
 #define ESP_WIFI_SSID CONFIG_ESP_WIFI_SSID
 #define ESP_WIFI_PASS CONFIG_ESP_WIFI_PASSWORD
@@ -160,6 +189,37 @@ void wifi_init_sta(void)
     }
 }
 
+/* ADC */
+
+adc_oneshot_unit_handle_t adc_init(adc_unit_t adc_unit, adc_channel_t adc_channel, adc_atten_t adc_atten)
+{
+
+    //-------------ADC Init---------------//
+    adc_oneshot_unit_handle_t adc_handle;
+    adc_oneshot_unit_init_cfg_t init_config = {
+        .unit_id = adc_unit,
+        .ulp_mode = ADC_ULP_MODE_DISABLE,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &adc_handle));
+
+    //-------------ADC Config---------------//
+    adc_oneshot_chan_cfg_t config = {
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+        .atten = adc_atten,
+    };
+    //-------------ADC Config---------------//
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, adc_channel, &config));
+
+    return adc_handle;
+}
+
+int get_moisture_percentage()
+{
+    ESP_ERROR_CHECK(adc_oneshot_read(papi_adc_handle, SENS_01, &adc_raw[0]));
+
+    return (int)((1 - ((float)adc_raw[0] / 4096)) * 100);
+}
+
 /*---------------------------------------------------------------
   ---------------------------------------------------------------
        MQTT
@@ -188,7 +248,14 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         esp_mqtt_client_publish(client, "pv0/status/mc", "ONLINE", 0, 0, 0);
+        // meh
         esp_mqtt_client_subscribe(client, "pv0/test", 0);
+
+        // subscribe to /indratest/motor/
+        // should be qos2 - exactly 1ce
+        msg_id = esp_mqtt_client_subscribe(client, "pv0/commands", 2);
+        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -210,8 +277,36 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         if (strncmp(event->topic, "pv0/commands", event->topic_len) == 0)
         {
-            if (strncmp(event->data, "MOISTURE_GET", event->data_len) == 0)
+            if (strncmp(event->data, "WATER_ON", event->data_len) == 0)
             {
+                ESP_LOGI(TAG, "Turning on Water");
+                gpio_set_level(MOTOR, 1);
+            }
+            else if (strncmp(event->data, "WATER_OFF", event->data_len) == 0)
+            {
+                ESP_LOGI(TAG, "Turning off Water");
+                gpio_set_level(MOTOR, 0);
+            }
+            else if (strncmp(event->data, "MOISTURE_GET", event->data_len) == 0)
+            {
+                // errors unless sensor is actually connected !
+                ESP_LOGI(TAG, "Checking soil moisture");
+                vTaskDelay(500 / portTICK_PERIOD_MS); // Adjust the delay as needed
+
+                // uint16_t moisture_percent = get_moisture_percentage();
+
+                int moisture_percent = get_moisture_percentage();
+
+                // str convert
+                int length = snprintf(NULL, 0, "%d", moisture_percent);
+                char *val = malloc(length + 1);
+                snprintf(val, length + 1, "%d", moisture_percent);
+
+                msg_id = esp_mqtt_client_publish(client, "pv0/moisture", val, 0, 0, 0);
+                ESP_LOGI(TAG, "sent SOIL MOISTURE successful, msg_id=%d", msg_id);
+                ESP_LOGI(TAG, "sent SOIL MOISTURE successful, data=%s", val);
+
+                free(val); // thank you C !!
             }
         }
         break;
@@ -257,7 +352,15 @@ void app_main()
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
 
-    // certificates problem 
+    // ADC Stuff
+    papi_adc_handle = adc_init(ADC_UNIT, SENS_01, ADC_ATTEN);
+
+    // motor stuff
+    gpio_reset_pin(MOTOR);
+    gpio_set_direction(MOTOR, GPIO_MODE_OUTPUT);
+
+    // certificates problem
+    // 07-07-2024@22:35 solved certificate problem by messing with AWS and docker conf. god
     // https://devopstar.com/2020/03/14/easy-aws-iot-with-esp-idf/
     mqtt_app_start(mqtt_event_handler);
 }

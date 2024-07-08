@@ -295,7 +295,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             else if (strncmp(event->data, "WATER_OFF", event->data_len) == 0)
             {
                 ESP_LOGI(TAG, "Turning off Water");
-                // gpio_set_level(MOTOR, 0);
+                gpio_set_level(MOTOR, 0);
             }
             else if (strncmp(event->data, "MOISTURE_GET", event->data_len) == 0)
             {

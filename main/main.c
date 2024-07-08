@@ -264,12 +264,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
-        // ADC Tear Down
-        // ESP_ERROR_CHECK(adc_oneshot_del_unit(adc_handle));
-        // if (do_calibration2)
-        // {
-        //     adc_calibration_deinit(adc_cali_handle);
-        // }
         break;
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
@@ -291,7 +285,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             if (strncmp(event->data, "WATER_ON", event->data_len) == 0)
             {
                 ESP_LOGI(TAG, "Turning on Water");
-                // gpio_set_level(MOTOR, 1);
+                gpio_set_level(MOTOR, 1);
             }
             else if (strncmp(event->data, "WATER_OFF", event->data_len) == 0)
             {
@@ -306,7 +300,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
                 ESP_ERROR_CHECK(adc_oneshot_read(papi_adc_handle, SENS_01, &adc_raw[0]));
 
-                printf("VALUE: %d\n", adc_raw[0]);
                 // str convert
                 int length = snprintf(NULL, 0, "%d", adc_raw[0]);
                 char *val = malloc(length + 1);

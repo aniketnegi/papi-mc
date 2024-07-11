@@ -237,6 +237,9 @@ static void log_error_if_nonzero(const char *message, int error_code)
     }
 }
 
+// taskHandle to control when to suspend and resume the bg sensor task
+TaskHandle_t taskHandle = NULL;
+
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
@@ -307,6 +310,20 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 ESP_LOGI(TAG, "sent SOIL MOISTURE successful, data=%s", val);
 
                 free(val); // thank you C !!
+            }
+            else if (strncmp(event->data, "MANUAL_OVERRIDE_ON", event->data_len) == 0)
+            {
+                ESP_LOGI(TAG, "SAYONARA: You are in control now!");
+                vTaskDelay(500 / portTICK_PERIOD_MS);
+
+                vTaskSuspend(taskHandle);
+            }
+            else if (strncmp(event->data, "MANUAL_OVERRIDE_OFF", event->data_len) == 0)
+            {
+                ESP_LOGI(TAG, "WELCOME BACK: My controls!");
+                vTaskDelay(500 / portTICK_PERIOD_MS);
+
+                vTaskResume(taskHandle);
             }
         }
         break;
@@ -408,7 +425,7 @@ void app_main()
 
     if (xMutex != NULL)
     {
-        xTaskCreate(sensor_task, "bg sensor", 4096, NULL, tskIDLE_PRIORITY, NULL);
+        xTaskCreate(sensor_task, "bg sensor", 4096, NULL, tskIDLE_PRIORITY, &taskHandle);
     }
 
     // certificates problem

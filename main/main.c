@@ -213,13 +213,6 @@ adc_oneshot_unit_handle_t adc_init(adc_unit_t adc_unit, adc_channel_t adc_channe
     return adc_handle;
 }
 
-int get_moisture_percentage()
-{
-    ESP_ERROR_CHECK(adc_oneshot_read(papi_adc_handle, SENS_01, &adc_raw[0]));
-
-    return (int)((1 - ((float)adc_raw[0] / 4096)) * 100);
-}
-
 /*---------------------------------------------------------------
   ---------------------------------------------------------------
        MQTT
@@ -363,6 +356,25 @@ SemaphoreHandle_t xMutex;
 #define MOISTURE_THRESHOLD_LOW 50  // Example threshold for turning the motor on
 #define MOISTURE_THRESHOLD_HIGH 60 // Example threshold for turning the motor off
 #define SENSOR_BG_READ_DELAY 7000  // (val / 1000) seconds
+
+#define SENSOR_MIN 950
+#define SENSOR_MAX 2600
+
+int normalise(int val, int min, int max, int a, int b)
+{
+    /* NORMALISE
+        take an input of `val`
+        return a number between `a` and `b` such that ret is `val` scaled between `min` and `max`
+    */
+    return (int)(((float)(b - a) * ((float)(val - min) / (max - min))) + a);
+}
+
+int get_moisture_percentage()
+{
+    ESP_ERROR_CHECK(adc_oneshot_read(papi_adc_handle, SENS_01, &adc_raw[0]));
+
+    return normalise(adc_raw[0], SENSOR_MIN, SENSOR_MAX, 0, 100);
+}
 
 // Function to control the motor based on sensor value
 void control_motor_based_on_moisture(int sensor_value)

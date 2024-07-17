@@ -213,6 +213,92 @@ adc_oneshot_unit_handle_t adc_init(adc_unit_t adc_unit, adc_channel_t adc_channe
     return adc_handle;
 }
 
+/* SENSOR TASK RUNNING IN THE BG */
+
+SemaphoreHandle_t xMutex;
+
+// Sensor Thresholds
+#define MOISTURE_THRESHOLD_LOW 35  // Example threshold for turning the motor on
+#define MOISTURE_THRESHOLD_HIGH 80 // Example threshold for turning the motor off
+#define SENSOR_BG_READ_DELAY 7000  // (val / 1000) seconds
+
+#define SENSOR_MIN 950
+#define SENSOR_MAX 2600
+
+/* FOR DEBUG */
+#define POT_MIN 0
+#define POT_MAX 4096
+
+bool motor = false;
+
+int normalise(int val, int min, int max, int a, int b)
+{
+    /* NORMALISE
+        take an input of `val`
+        return a number between `a` and `b` such that ret is `val` scaled between `min` and `max`
+    */
+    return (int)(((float)(b - a) * ((float)(val - min) / (max - min))) + a);
+}
+
+int get_moisture_percentage()
+{
+    ESP_ERROR_CHECK(adc_oneshot_read(papi_adc_handle, SENS_01, &adc_raw[0]));
+
+    return (100 - normalise(adc_raw[0], SENSOR_MIN, SENSOR_MAX, 0, 100));
+}
+
+static void turn_motor_on_pulse(bool motor_state)
+{
+    if (motor_state)
+    {
+        gpio_set_level(MOTOR, 1);
+        vTaskDelay(4000 / portTICK_PERIOD_MS);
+        gpio_set_level(MOTOR, 0);
+    }
+    else
+    {
+
+        gpio_set_level(MOTOR, 0);
+    }
+}
+
+// Function to control the motor based on sensor value
+void control_motor_based_on_moisture(int sensor_value)
+{
+
+    if (sensor_value < MOISTURE_THRESHOLD_LOW)
+    {
+        ESP_LOGI(TAG, "Moisture level low (%d), turning on water", sensor_value);
+        motor = true;
+    }
+
+    if (sensor_value > MOISTURE_THRESHOLD_HIGH)
+    {
+        ESP_LOGI(TAG, "Moisture level high (%d), turning off water", sensor_value);
+        motor = false;
+    }
+
+    turn_motor_on_pulse(motor);
+}
+
+// Sensor Reading and Motor Control Task
+void sensor_task(void *pvParameter)
+{
+    while (1)
+    {
+        if (xSemaphoreTake(xMutex, portMAX_DELAY))
+        {
+            int mp = get_moisture_percentage();
+
+            ESP_LOGI(TAG, "Moisture level: %d", mp);
+            control_motor_based_on_moisture(mp);
+
+            xSemaphoreGive(xMutex);
+        }
+        vTaskDelay(SENSOR_BG_READ_DELAY / portTICK_PERIOD_MS); // Adjust the delay as needed
+    }
+}
+
 /*---------------------------------------------------------------
   ---------------------------------------------------------------
        MQTT
@@ -319,6 +405,14 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 vTaskResume(taskHandle);
             }
         }
+        if (strncmp(event->topic, "pv0/test", event->topic_len) == 0)
+        {
+            if (strncmp(event->data, "PING", event->data_len) == 0)
+            {
+                msg_id = esp_mqtt_client_publish(client, "pv0/test", "PONG", 0, 0, 0);
+                ESP_LOGI(TAG, "sent SOIL MOISTURE successful, msg_id=%d", msg_id);
+            }
+        }
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -346,69 +440,6 @@ void mqtt_app_start(esp_mqtt_event_handle_t mqtt_event_handler_cb)
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler_cb, NULL);
     esp_mqtt_client_start(client);
-}
-
-/* SENSOR TASK RUNNING IN THE BG */
-
-SemaphoreHandle_t xMutex;
-
-// Sensor Thresholds
-#define MOISTURE_THRESHOLD_LOW 50  // Example threshold for turning the motor on
-#define MOISTURE_THRESHOLD_HIGH 60 // Example threshold for turning the motor off
-#define SENSOR_BG_READ_DELAY 7000  // (val / 1000) seconds
-
-#define SENSOR_MIN 950
-#define SENSOR_MAX 2600
-
-int normalise(int val, int min, int max, int a, int b)
-{
-    /* NORMALISE
-        take an input of `val`
-        return a number between `a` and `b` such that ret is `val` scaled between `min` and `max`
-    */
-    return (int)(((float)(b - a) * ((float)(val - min) / (max - min))) + a);
-}
-
-int get_moisture_percentage()
-{
-    ESP_ERROR_CHECK(adc_oneshot_read(papi_adc_handle, SENS_01, &adc_raw[0]));
-
-    return normalise(adc_raw[0], SENSOR_MIN, SENSOR_MAX, 0, 100);
-}
-
-// Function to control the motor based on sensor value
-void control_motor_based_on_moisture(int sensor_value)
-{
-    if (sensor_value < MOISTURE_THRESHOLD_LOW)
-    {
-        ESP_LOGI(TAG, "Moisture level low (%d), turning on water", sensor_value);
-        gpio_set_level(MOTOR, 1);
-        vTaskDelay(4000 / portTICK_PERIOD_MS);
-        gpio_set_level(MOTOR, 0);
-    }
-    else if (sensor_value > MOISTURE_THRESHOLD_HIGH)
-    {
-        ESP_LOGI(TAG, "Moisture level high (%d), turning off water", sensor_value);
-        gpio_set_level(MOTOR, 0);
-    }
-}
-
-// Sensor Reading and Motor Control Task
-void sensor_task(void *pvParameter)
-{
-    while (1)
-    {
-        if (xSemaphoreTake(xMutex, portMAX_DELAY))
-        {
-            int mp = get_moisture_percentage();
-
-            ESP_LOGI(TAG, "Moisture level: %d", mp);
-            control_motor_based_on_moisture(mp);
-
-            xSemaphoreGive(xMutex);
-        }
-        vTaskDelay(SENSOR_BG_READ_DELAY / portTICK_PERIOD_MS); // Adjust the delay as needed
-    }
 }
 
 void app_main()

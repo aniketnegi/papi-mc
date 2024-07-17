@@ -331,7 +331,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         esp_mqtt_client_publish(client, "pv0/status/mc", "ONLINE", 0, 0, 0);
         // meh
-        esp_mqtt_client_subscribe(client, "pv0/test", 0);
+        esp_mqtt_client_subscribe(client, "pv0/ping", 0);
 
         // subscribe to /indratest/motor/
         // should be qos2 - exactly 1ce
@@ -405,11 +405,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 vTaskResume(taskHandle);
             }
         }
-        if (strncmp(event->topic, "pv0/test", event->topic_len) == 0)
+        if (strncmp(event->topic, "pv0/ping", event->topic_len) == 0)
         {
             if (strncmp(event->data, "PING", event->data_len) == 0)
             {
-                msg_id = esp_mqtt_client_publish(client, "pv0/test", "PONG", 0, 0, 0);
+                msg_id = esp_mqtt_client_publish(client, "pv0/pong", "PONG", 0, 0, 0);
                 ESP_LOGI(TAG, "sent SOIL MOISTURE successful, msg_id=%d", msg_id);
             }
         }

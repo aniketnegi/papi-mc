@@ -217,6 +217,10 @@ adc_oneshot_unit_handle_t adc_init(adc_unit_t adc_unit, adc_channel_t adc_channe
 
 SemaphoreHandle_t xMutex;
 
+// taskHandle to control when to suspend and resume the bg sensor task
+TaskHandle_t taskHandle = NULL;
+TimerHandle_t xTimer = NULL;
+
 // Sensor Thresholds
 #define MOISTURE_THRESHOLD_LOW 35  // Example threshold for turning the motor on
 #define MOISTURE_THRESHOLD_HIGH 80 // Example threshold for turning the motor off
@@ -299,6 +303,13 @@ void sensor_task(void *pvParameter)
     }
 }
 
+// Timer callback function
+void vTimerCallback(TimerHandle_t xTimer)
+{
+    ESP_LOGI(TAG, "Resuming sensor_task");
+    vTaskResume(taskHandle);
+}
+
 /*---------------------------------------------------------------
   ---------------------------------------------------------------
        MQTT
@@ -316,8 +327,6 @@ static void log_error_if_nonzero(const char *message, int error_code)
     }
 }
 
-// taskHandle to control when to suspend and resume the bg sensor task
-TaskHandle_t taskHandle = NULL;
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
@@ -336,6 +345,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         // subscribe to /indratest/motor/
         // should be qos2 - exactly 1ce
         msg_id = esp_mqtt_client_subscribe(client, "pv0/commands", 2);
+        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+        msg_id = esp_mqtt_client_subscribe(client, "pv0/autodelayx", 2);
         ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
 
         break;
@@ -405,13 +416,24 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 vTaskResume(taskHandle);
             }
         }
-        if (strncmp(event->topic, "pv0/ping", event->topic_len) == 0)
+        else if (strncmp(event->topic, "pv0/ping", event->topic_len) == 0)
         {
             if (strncmp(event->data, "PING", event->data_len) == 0)
             {
                 msg_id = esp_mqtt_client_publish(client, "pv0/pong", "PONG", 0, 0, 0);
-                ESP_LOGI(TAG, "sent SOIL MOISTURE successful, msg_id=%d", msg_id);
+                ESP_LOGI(TAG, "sent PONG successful, msg_id=%d", msg_id);
             }
+        }
+        else if (strncmp(event->topic, "pv0/autodelayx", event->topic_len) == 0)
+        {
+            int delay_s;
+            sscanf(event->data, "%d", &delay_s);
+
+            ESP_LOGI(TAG, "Suspending AUTO mode for %d seconds", delay_s);
+
+            vTaskSuspend(taskHandle);
+            xTimerChangePeriod(xTimer, pdMS_TO_TICKS(delay_s * 1000), 0);
+            xTimerStart(xTimer, 0);
         }
         break;
     case MQTT_EVENT_ERROR:
@@ -469,6 +491,13 @@ void app_main()
     if (xMutex != NULL)
     {
         xTaskCreate(sensor_task, "bg sensor", 4096, NULL, tskIDLE_PRIORITY, &taskHandle);
+    }
+
+    // Create the timer for delaying the sensor task
+    xTimer = xTimerCreate("SensorTimer", pdMS_TO_TICKS(1000), pdFALSE, (void *)0, vTimerCallback);
+    if (xTimer == NULL)
+    {
+        ESP_LOGE(TAG, "Timer creation failed!");
     }
 
     // certificates problem
